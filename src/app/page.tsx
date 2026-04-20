@@ -326,8 +326,8 @@ export default function Home() {
            {/* MAIN DISPLAY AREA */}
            <div className="w-full flex-1 min-h-[500px] md:min-h-[600px] relative rounded-[2.5rem] overflow-hidden bg-slate-950/80 border border-slate-800 shadow-inner group">
               {canDisplay ? (
-                <div className="w-full h-full p-4 flex items-center justify-center">
-                  {viewMode === "radar" || !currentLocation ? (
+                <div className="w-full h-[500px] md:h-[600px] p-4 flex items-center justify-center">
+                  {viewMode === "radar" ? (
                     <Radar distance={checkResult?.distance || 0} bearing={bearing} isViolated={checkResult?.isViolated || false} />
                   ) : (
                     <MapView 
