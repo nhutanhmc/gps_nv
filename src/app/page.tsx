@@ -181,15 +181,16 @@ export default function Home() {
         setIsValidating(false);
       },
       async (err) => {
-        if (trackingMode === "wifi") {
-           // If WiFi mode, GPS failure is acceptable
+        if (err.code === err.TIMEOUT) {
+           setError("Tín hiệu GPS yếu (Timeout). Hãy thử di chuyển ra gần cửa sổ hoặc chuyển sang chế độ Wi-Fi.");
+        } else if (trackingMode === "wifi") {
            await performIpOnlyCheck(fetchedIp);
         } else {
            setError("Lỗi lấy vị trí (GPS): " + err.message);
         }
         setIsValidating(false);
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 30000 }
     );
   };
 
