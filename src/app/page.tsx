@@ -37,7 +37,7 @@ type ViewMode = "radar" | "map";
 
 function Radar({ distance, bearing, isViolated }: { distance: number; bearing: number; isViolated: boolean }) {
   const maxRadarDist = 150; 
-  const radius = Math.min((distance / maxRadarDist) * 120, 140); // Larger radius for larger layout
+  const radius = Math.min((distance / maxRadarDist) * 120, 140); 
   
   const angleRad = (bearing - 90) * (Math.PI / 180);
   const x = radius * Math.cos(angleRad);
@@ -51,14 +51,10 @@ function Radar({ distance, bearing, isViolated }: { distance: number; bearing: n
       <div className="absolute w-full h-full border border-dashed border-indigo-500/10 rounded-full scale-[0.85] animate-[spin_15s_linear_infinite]"></div>
       
       <div className="absolute w-[180px] h-[180px] border-2 border-dashed border-rose-500/10 rounded-full"></div>
-
       <div className="absolute w-full h-px bg-slate-800/40"></div>
       <div className="absolute h-full w-px bg-slate-800/40"></div>
-
       <div className="absolute w-1/2 h-1/2 top-0 left-1/2 origin-bottom-left bg-gradient-to-tr from-indigo-500/10 to-transparent animate-[spin_5s_linear_infinite] rounded-tr-full"></div>
-
       <div className="relative z-10 w-3 h-3 bg-blue-500 rounded-full shadow-[0_0_20px_rgba(59,130,246,0.8)] border-2 border-white/20"></div>
-
       <div 
         className="absolute transition-all duration-1000 ease-out z-20"
         style={{ transform: `translate(${x}px, ${y}px)` }}
@@ -67,7 +63,6 @@ function Radar({ distance, bearing, isViolated }: { distance: number; bearing: n
            <div className={`absolute inset-0 rounded-full animate-ping opacity-50 ${isViolated ? "bg-rose-500" : "bg-emerald-400"}`}></div>
         </div>
       </div>
-
       <div className="absolute bottom-4 right-4 text-[10px] font-black text-slate-700 uppercase tracking-widest">Active Scan: 150m</div>
     </div>
   );
@@ -79,8 +74,9 @@ export default function Home() {
   const [currentLocation, setCurrentLocation] = useState<Location | null>(null);
   const [currentIp, setCurrentIp] = useState<string | null>(null);
   const [trackingMode, setTrackingMode] = useState<TrackingMode>("gps");
-  const [viewMode, setViewMode] = useState<ViewMode>("map"); // Default to Map now
+  const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [isWorking, setIsWorking] = useState(false);
+  const [isValidating, setIsValidating] = useState(false); // NEW: validation feedback
   const [checkResult, setCheckResult] = useState<CheckResult | null>(null);
   const [bearing, setBearing] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +89,9 @@ export default function Home() {
     const storedIp = localStorage.getItem("homeIp");
     const storedMode = localStorage.getItem("trackingMode") as TrackingMode;
 
-    if (storedLoc) setHomeLocation(JSON.parse(storedLoc));
+    if (storedLoc) {
+       try { setHomeLocation(JSON.parse(storedLoc)); } catch(e) {}
+    }
     if (storedIp) setHomeIp(storedIp);
     if (storedMode) setTrackingMode(storedMode);
   }, []);
@@ -119,7 +117,7 @@ export default function Home() {
 
     const ip = await fetchPublicIp();
     if (!ip) {
-      setError("Không thể lấy địa chỉ IP mạng.");
+      setError("Không thể lấy địa chỉ IP. Vui lòng kiểm tra mạng.");
       setLoading(false);
       return;
     }
@@ -136,26 +134,28 @@ export default function Home() {
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
         };
-        
         setHomeLocation(newHomeLoc);
         setHomeIp(ip);
         setCurrentIp(ip);
-
         localStorage.setItem("homeLocation", JSON.stringify(newHomeLoc));
         localStorage.setItem("homeIp", ip);
-        
         setLoading(false);
       },
       (err) => {
         setError("Lỗi lấy vị trí: " + err.message);
         setLoading(false);
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, timeout: 10000 } // Added timeout
     );
   };
 
   const checkPosition = async () => {
-    if (!homeLocation && trackingMode !== "wifi") return;
+    // Only block if we absolutely have no data for the current mode
+    if (trackingMode === "gps" && !homeLocation) return;
+    if (trackingMode === "wifi" && !homeIp) return;
+    if (trackingMode === "hybrid" && (!homeLocation || !homeIp)) return;
+
+    setIsValidating(true);
 
     let fetchedIp = currentIp;
     if (trackingMode === "wifi" || trackingMode === "hybrid") {
@@ -163,6 +163,7 @@ export default function Home() {
       setCurrentIp(fetchedIp);
     }
 
+    // Try to get GPS, otherwise fallback to IP only if permitted
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const currentCoord = {
@@ -176,36 +177,43 @@ export default function Home() {
           setBearing(b);
         }
 
-        try {
-          const res = await fetch("/api/check-distance", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: trackingMode,
-              userLat: currentCoord.latitude,
-              userLon: currentCoord.longitude,
-              homeLat: homeLocation?.latitude,
-              homeLon: homeLocation?.longitude,
-              userIp: fetchedIp,
-              homeIp: homeIp,
-            }),
-          });
-
-          const data = await res.json();
-          setCheckResult(data);
-          setError(null);
-        } catch (err) {
-          setError("Lỗi kết nối Server");
-        }
+        await callCheckApi(currentCoord.latitude, currentCoord.longitude, fetchedIp);
+        setIsValidating(false);
       },
-      (err) => {
-        if (trackingMode !== "wifi") {
-           setError("Lỗi lấy vị trí hiện tại: " + err.message);
+      async (err) => {
+        if (trackingMode === "wifi") {
+           // If WiFi mode, GPS failure is acceptable
+           await performIpOnlyCheck(fetchedIp);
         } else {
-           performIpOnlyCheck(fetchedIp);
+           setError("Lỗi lấy vị trí (GPS): " + err.message);
         }
-      }
+        setIsValidating(false);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
     );
+  };
+
+  const callCheckApi = async (uLat?: number, uLon?: number, uIp?: string | null) => {
+    try {
+      const res = await fetch("/api/check-distance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: trackingMode,
+          userLat: uLat,
+          userLon: uLon,
+          homeLat: homeLocation?.latitude,
+          homeLon: homeLocation?.longitude,
+          userIp: uIp,
+          homeIp: homeIp,
+        }),
+      });
+      const data = await res.json();
+      setCheckResult(data);
+      setError(null);
+    } catch (err) {
+      setError("Lỗi kết nối Server");
+    }
   };
 
   const performIpOnlyCheck = async (fetchedIp: string | null) => {
@@ -232,6 +240,9 @@ export default function Home() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [isWorking, homeLocation, homeIp, trackingMode]);
 
+  // Determine if we can show the main visualize display
+  const canDisplay = isWorking && (homeLocation || (trackingMode === "wifi" && homeIp));
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8 font-sans overflow-x-hidden selection:bg-indigo-500/30">
       <div className="max-w-5xl mx-auto space-y-8">
@@ -253,7 +264,7 @@ export default function Home() {
               ].map((mode) => (
                 <button
                   key={mode.id}
-                  onClick={() => setTrackingMode(mode.id as TrackingMode)}
+                  onClick={() => { setTrackingMode(mode.id as TrackingMode); setCheckResult(null); }}
                   className={`py-3 px-6 rounded-xl text-[10px] font-black transition-all flex items-center justify-center gap-2 border uppercase tracking-widest ${
                     trackingMode === mode.id
                       ? "bg-indigo-600 text-white shadow-xl shadow-indigo-500/30 border-indigo-400/50 scale-105"
@@ -265,12 +276,10 @@ export default function Home() {
                 </button>
               ))}
            </div>
-
-           {/* Decorative BG for Header */}
            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 blur-[100px] rounded-full -translate-y-1/2 translate-x-1/2"></div>
         </header>
 
-        {/* Hero Display Section - LARGER MAP */}
+        {/* Hero Display Section */}
         <section className="bg-slate-900/50 border border-slate-800 rounded-[3rem] p-4 md:p-8 backdrop-blur-2xl shadow-[0_0_100px_rgba(0,0,0,0.5)] flex flex-col items-center gap-8 relative">
            
            {/* Top Control Bar */}
@@ -291,14 +300,20 @@ export default function Home() {
               </div>
 
               <div className="flex items-center gap-4">
-                 {checkResult && (
+                 {isValidating && (
+                    <div className="flex items-center gap-2 px-4 py-2 text-[10px] font-black text-indigo-400 animate-pulse uppercase tracking-widest">
+                       <div className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+                       Synchronising...
+                    </div>
+                 )}
+                 {checkResult && !isValidating && (
                     <div className={`px-6 py-2 rounded-full border-2 font-black text-xs uppercase tracking-widest shadow-2xl transition-all duration-500 animate-in zoom-in-50 ${checkResult.isViolated ? "text-rose-500 border-rose-500/30 bg-rose-500/10" : "text-emerald-500 border-emerald-500/30 bg-emerald-500/10"}`}>
                        {checkResult.isViolated ? "⚠️ Violated Domain" : "✓ Secure Perimeter"}
                     </div>
                  )}
                  <button
-                    onClick={() => setIsWorking(!isWorking)}
-                    disabled={!homeLocation && trackingMode !== "wifi"}
+                    onClick={() => { setIsWorking(!isWorking); setError(null); }}
+                    disabled={!homeLocation && !homeIp}
                     className={`group relative flex items-center justify-center p-1 rounded-full transition-all duration-500 ${isWorking ? "bg-emerald-500/20" : "bg-slate-800/40"}`}
                  >
                     <div className={`px-6 py-2 rounded-full font-black text-[10px] uppercase tracking-[0.3em] transition-all border ${isWorking ? "bg-emerald-500 text-white border-emerald-400 shadow-[0_0_30px_rgba(16,185,129,0.5)]" : "bg-slate-900 text-slate-500 border-slate-700"}`}>
@@ -308,11 +323,11 @@ export default function Home() {
               </div>
            </div>
 
-           {/* MAIN DISPLAY AREA - IMMERSIVE */}
+           {/* MAIN DISPLAY AREA */}
            <div className="w-full flex-1 min-h-[500px] md:min-h-[600px] relative rounded-[2.5rem] overflow-hidden bg-slate-950/80 border border-slate-800 shadow-inner group">
-              {isWorking && homeLocation ? (
+              {canDisplay ? (
                 <div className="w-full h-full p-4 flex items-center justify-center">
-                  {viewMode === "radar" ? (
+                  {viewMode === "radar" || !currentLocation ? (
                     <Radar distance={checkResult?.distance || 0} bearing={bearing} isViolated={checkResult?.isViolated || false} />
                   ) : (
                     <MapView 
@@ -320,6 +335,13 @@ export default function Home() {
                       currentLocation={currentLocation} 
                       isViolated={checkResult?.isViolated || false} 
                     />
+                  )}
+                  
+                  {/* Fallback overlay if Map is inactive in WiFi mode */}
+                  {!currentLocation && viewMode === "map" && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm z-50">
+                       <p className="text-xs font-black text-slate-400 uppercase tracking-widest text-center px-10">GPS Coordinates missing.<br/>Switch to Radar for IP Status View.</p>
+                    </div>
                   )}
                 </div>
               ) : (
@@ -329,7 +351,7 @@ export default function Home() {
                    </div>
                    <div className="space-y-2 max-w-md">
                       <h3 className="text-xl font-bold text-slate-500 uppercase tracking-widest">Calibration Critical</h3>
-                      <p className="text-sm text-slate-700 font-medium leading-relaxed">System requires a verified Home Location checkpoint to begin tactical monitoring. Please use the Calibration unit below.</p>
+                      <p className="text-sm text-slate-700 font-medium leading-relaxed">System requires a verified Checkpoint (GPS or IP) to begin tactical monitoring. Please use the Calibration unit below.</p>
                    </div>
                 </div>
               )}
@@ -337,11 +359,11 @@ export default function Home() {
               {/* Data Overlays */}
               <div className="absolute bottom-6 right-6 z-[10] flex flex-col gap-2 pointer-events-none">
                  <div className="bg-slate-900/90 backdrop-blur-xl p-6 rounded-3xl border border-slate-800 shadow-2xl flex flex-col items-end gap-1">
-                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Calculated Distance</span>
+                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Outcome Status</span>
                     <div className={`text-6xl font-black tabular-nums tracking-tighter ${checkResult?.isViolated ? "text-rose-500" : "text-emerald-500"}`}>
-                       {isWorking ? (trackingMode === "wifi" ? (checkResult?.isViolated ? "FAIL" : "PASS") : `${checkResult?.distance || 0}m`) : "---"}
+                       {!isWorking ? "---" : (trackingMode === "wifi" ? (checkResult?.isViolated ? "FAIL" : "PASS") : `${checkResult?.distance || 0}m`)}
                     </div>
-                    <span className="text-[9px] font-bold text-slate-600">{checkResult ? `Update: ${new Date(checkResult.timestamp).toLocaleTimeString()}` : "Waiting..."}</span>
+                    <span className="text-[9px] font-bold text-slate-600">{checkResult ? `Update: ${new Date(checkResult.timestamp).toLocaleTimeString()}` : "Waiting for scan..."}</span>
                  </div>
               </div>
            </div>
@@ -349,8 +371,6 @@ export default function Home() {
 
         {/* Secondary Info Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-           
-           {/* Calibration Unit */}
            <div className="md:col-span-1 bg-slate-900/40 border border-slate-800 rounded-[2.5rem] p-6 space-y-6">
               <h2 className="text-xs font-black flex items-center gap-3 text-slate-500 uppercase tracking-widest">
                 <span className="w-1.5 h-6 bg-indigo-500 rounded-full"></span>
@@ -364,7 +384,7 @@ export default function Home() {
                    </p>
                 </div>
                 <div className="pt-4 border-t border-slate-800/40 space-y-1">
-                   <p className="text-[9px] text-slate-600 uppercase tracking-widest font-black">Secure IP Address</p>
+                   <p className="text-[9px] text-slate-600 uppercase tracking-widest font-black">Authenticated IP</p>
                    <p className="font-mono text-xs text-emerald-400/80">{homeIp || "MISSING"}</p>
                 </div>
               </div>
@@ -377,7 +397,6 @@ export default function Home() {
               </button>
            </div>
 
-           {/* Metrics Grid */}
            <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
               <div className="bg-slate-900/40 border border-slate-800 rounded-[2.5rem] p-8 group hover:border-indigo-500/30 transition-all flex flex-col justify-between">
                  <div className="space-y-1 text-right">
@@ -388,7 +407,6 @@ export default function Home() {
                     <span className="text-[9px] font-black text-indigo-500 px-2 py-1 bg-indigo-500/10 rounded-md border border-indigo-500/20">WAN-IPv4</span>
                  </div>
               </div>
-
               <div className="bg-slate-900/40 border border-slate-800 rounded-[2.5rem] p-8 group hover:border-emerald-500/30 transition-all flex flex-col justify-between">
                  <div className="space-y-1 text-right">
                     <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest opacity-60">Compass Bearing</h3>
@@ -401,7 +419,6 @@ export default function Home() {
            </div>
         </div>
 
-        {/* Dynamic Warning Alert */}
         {error && (
           <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-rose-600 text-white px-10 py-5 rounded-[2rem] font-black shadow-[0_0_50px_rgba(225,29,72,0.4)] flex items-center gap-4 animate-in slide-in-from-bottom-12 z-[1000] border border-white/20">
             <span className="text-2xl">⚠️</span>
@@ -410,7 +427,6 @@ export default function Home() {
         )}
       </div>
 
-      {/* Atmospheric Background */}
       <div className="fixed inset-0 -z-10 pointer-events-none">
          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(79,70,229,0.08),transparent_70%)]"></div>
          <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_80%,rgba(16,185,129,0.05),transparent_60%)]"></div>
