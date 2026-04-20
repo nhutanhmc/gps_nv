@@ -252,7 +252,7 @@ export default function Home() {
         <header className="flex flex-col md:flex-row items-center justify-between gap-6 bg-slate-900/40 border border-slate-800 p-8 rounded-[2.5rem] backdrop-blur-xl shadow-2xl relative overflow-hidden">
            <div className="relative z-10 text-center md:text-left space-y-2">
               <h1 className="text-4xl md:text-6xl font-black tracking-tighter bg-gradient-to-br from-white via-slate-300 to-slate-500 bg-clip-text text-transparent italic">
-                PROXIMITY
+                Check định vị
               </h1>
               <p className="text-indigo-400 font-black text-xs uppercase tracking-[0.4em] px-1">Tactical Surveillance v.2.5</p>
            </div>
