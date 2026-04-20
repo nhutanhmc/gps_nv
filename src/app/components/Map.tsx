@@ -88,15 +88,21 @@ export default function MapView({ homeLocation, currentLocation, isViolated }: M
         )}
       </MapContainer>
       
-      {/* Legend */}
-      <div className="absolute bottom-4 left-4 z-[1000] bg-slate-900/80 backdrop-blur-md p-2 rounded-lg border border-slate-700 text-[10px] space-y-1">
+      {/* Legend & Status */}
+      <div className="absolute bottom-4 left-4 z-[1000] bg-slate-900/90 backdrop-blur-md p-3 rounded-2xl border border-slate-700/50 text-[10px] space-y-2 shadow-2xl">
+         {!currentLocation && (
+            <div className="flex items-center gap-2 pb-2 border-b border-slate-800 mb-1">
+               <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></div>
+               <span className="font-black text-rose-500 uppercase tracking-tighter">GPS Signal Lost</span>
+            </div>
+         )}
          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
-            <span>Home Location</span>
+            <div className="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]"></div>
+            <span className="font-bold text-slate-300">Home Base</span>
          </div>
          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${isViolated ? "bg-rose-500" : "bg-emerald-500"}`}></div>
-            <span>Current Position</span>
+            <div className={`w-2.5 h-2.5 rounded-full ${isViolated ? "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.5)]" : "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"}`}></div>
+            <span className="font-bold text-slate-300">User Track</span>
          </div>
       </div>
     </div>

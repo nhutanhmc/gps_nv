@@ -337,11 +337,6 @@ export default function Home() {
                     />
                   )}
                   
-                  {/* Fallback overlay if Map is inactive in WiFi mode */}
-                  {!currentLocation && viewMode === "map" && (
-                    <div className="absolute inset-0 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm z-50">
-                       <p className="text-xs font-black text-slate-400 uppercase tracking-widest text-center px-10">GPS Coordinates missing.<br/>Switch to Radar for IP Status View.</p>
-                    </div>
                   )}
                 </div>
               ) : (
