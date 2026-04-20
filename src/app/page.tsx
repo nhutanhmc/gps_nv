@@ -336,8 +336,6 @@ export default function Home() {
                       isViolated={checkResult?.isViolated || false} 
                     />
                   )}
-                  
-                  )}
                 </div>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8 space-y-6">
